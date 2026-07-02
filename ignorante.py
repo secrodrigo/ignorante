@@ -895,6 +895,214 @@ def dec_command(args: list):
 
 
 # ─────────────────────────────────────────────
+#  module: hashid  (hash type identification)
+# ─────────────────────────────────────────────
+# each entry: (pattern, [(name, hashcat_mode, john_format), ...]).
+# order matters — unambiguous structured formats first, then raw-hex by length,
+# then short/ambiguous base64 forms last. hashcat mode / john format are None
+# when there isn't a well-known one.
+
+_HASH_DB_RAW = [
+    # --- structured / prefixed (unambiguous) ---
+    (r"^\$2[abxy]?\$\d\d\$[./A-Za-z0-9]{53}$",
+        [("bcrypt (Blowfish)", 3200, "bcrypt")]),
+    (r"^\$1\$[./0-9A-Za-z]{1,8}\$[./0-9A-Za-z]{22}$",
+        [("md5crypt (Unix MD5, $1$)", 500, "md5crypt")]),
+    (r"^\$apr1\$[./0-9A-Za-z]{1,8}\$[./0-9A-Za-z]{22}$",
+        [("Apache apr1 (MD5)", 1600, "md5crypt")]),
+    (r"^\$5\$(rounds=\d+\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{43}$",
+        [("sha256crypt (Unix, $5$)", 7400, "sha256crypt")]),
+    (r"^\$6\$(rounds=\d+\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$",
+        [("sha512crypt (Unix, $6$)", 1800, "sha512crypt")]),
+    (r"^\$y\$[./A-Za-z0-9]+\$[./A-Za-z0-9]+\$[./A-Za-z0-9]+$",
+        [("yescrypt", None, "crypt")]),
+    (r"^\$7\$[./A-Za-z0-9]{11,}$",
+        [("scrypt ($7$)", 8900, None)]),
+    (r"^\$argon2(id|i|d)\$",
+        [("Argon2", None, "argon2")]),
+    (r"^\$pbkdf2-sha512\$",
+        [("PBKDF2-HMAC-SHA512 (passlib)", 12100, None)]),
+    (r"^\$pbkdf2-sha256\$",
+        [("PBKDF2-HMAC-SHA256 (passlib)", 10900, None)]),
+    (r"^\$pbkdf2\$",
+        [("PBKDF2-HMAC-SHA1 (passlib)", 12000, None)]),
+    (r"^pbkdf2_sha256\$\d+\$",
+        [("Django PBKDF2-SHA256", 10000, "django")]),
+    (r"^sha1\$[^$]+\$[0-9a-fA-F]{40}$",
+        [("Django SHA1", 124, None)]),
+    (r"^md5\$[^$]+\$[0-9a-fA-F]{32}$",
+        [("Django MD5", None, None)]),
+    (r"^\$P\$[./0-9A-Za-z]{31}$",
+        [("phpass (WordPress / phpBB3)", 400, "phpass")]),
+    (r"^\$H\$[./0-9A-Za-z]{31}$",
+        [("phpass (Drupal 7 / older)", 400, "phpass")]),
+    (r"^\$S\$[./0-9A-Za-z]{52}$",
+        [("Drupal 7 (SHA-512)", 7900, "drupal7")]),
+    (r"^\{SSHA512\}[A-Za-z0-9+/]{20,}={0,2}$",
+        [("LDAP SSHA-512 (base64)", 1711, None)]),
+    (r"^\{SSHA\}[A-Za-z0-9+/]{20,}={0,2}$",
+        [("LDAP SSHA-1 (salted SHA1, base64)", 111, "ssha")]),
+    (r"^\{SHA\}[A-Za-z0-9+/]{27}=$",
+        [("LDAP SHA-1 (base64)", 101, "raw-sha1")]),
+    (r"^\{SMD5\}[A-Za-z0-9+/]{20,}={0,2}$",
+        [("LDAP salted MD5 (base64)", None, None)]),
+    (r"^\{MD5\}[A-Za-z0-9+/]{22}==$",
+        [("LDAP MD5 (base64)", None, None)]),
+    (r"^\$NT\$[0-9a-fA-F]{32}$",
+        [("NTLM ($NT$)", 1000, "nt")]),
+    (r"^\*[0-9A-Fa-f]{40}$",
+        [("MySQL 4.1+/5.x (SHA1(SHA1))", 300, "mysql-sha1")]),
+    (r"^0x0100[0-9a-fA-F]{48}$",
+        [("MSSQL 2005", 132, "mssql05")]),
+    (r"^0x0100[0-9a-fA-F]{88}$",
+        [("MSSQL 2000", 131, "mssql")]),
+    (r"^0x0200[0-9a-fA-F]{136}$",
+        [("MSSQL 2012/2014", 1731, "mssql12")]),
+    (r"^\$8\$[./A-Za-z0-9]+\$[./A-Za-z0-9]{43}$",
+        [("Cisco IOS type 8 (PBKDF2-SHA256)", 9200, "cisco8")]),
+    (r"^\$9\$[./A-Za-z0-9]+\$[./A-Za-z0-9]{43}$",
+        [("Cisco IOS type 9 (scrypt)", 9300, "cisco9")]),
+    (r"^\$krb5tgs\$",
+        [("Kerberos 5 TGS-REP", 13100, "krb5tgs")]),
+    (r"^\$krb5asrep\$",
+        [("Kerberos 5 AS-REP", 18200, "krb5asrep")]),
+    (r"^\$krb5pa\$",
+        [("Kerberos 5 AS-REQ Pre-Auth", 7500, "krb5pa-md5")]),
+    (r"^\$sshng\$",
+        [("SSH private key", 22921, "ssh")]),
+    (r"^\$DCC2\$",
+        [("Domain Cached Credentials 2 (MS-Cache v2)", 2100, "mscash2")]),
+    (r"^\$WPAPSK\$",
+        [("WPA/WPA2 PSK", 2500, "wpapsk")]),
+    (r"^\$office\$",
+        [("MS Office document", None, "office")]),
+    (r"^\$pdf\$",
+        [("PDF document", None, "pdf")]),
+    (r"^\$zip2\$",
+        [("WinZip", 13600, "zip")]),
+    (r"^\$pkzip2\$",
+        [("PKZIP", 17200, "pkzip")]),
+    (r"^\$rar5\$",
+        [("RAR5", 13000, "rar5")]),
+    (r"^\$RAR3\$",
+        [("RAR3", 12500, "rar3")]),
+    (r"^\$7z\$",
+        [("7-Zip", 11600, "7z")]),
+    (r"^\$keepass\$",
+        [("KeePass", 13400, "keepass")]),
+    (r"^\$bitcoin\$",
+        [("Bitcoin/Litecoin wallet.dat", 11300, "bitcoin")]),
+    (r"^\$ethereum\$",
+        [("Ethereum wallet", 15600, "ethereum")]),
+    (r"^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
+        [("JWT (JSON Web Token)", 16500, None)]),
+    (r"^[^:]+::[^:]*:[0-9a-fA-F]{48}:[0-9a-fA-F]{48}:[0-9a-fA-F]{16}$",
+        [("NetNTLMv1", 5500, "netntlm")]),
+    (r"^[^:]+::[^:]*:[0-9a-fA-F]{16}:[0-9a-fA-F]{32}:[0-9a-fA-F]+$",
+        [("NetNTLMv2", 5600, "netntlmv2")]),
+
+    # --- raw hex by length ---
+    (r"^[a-fA-F0-9]{4}$",
+        [("CRC-16", None, None), ("CRC-16-CCITT", None, None)]),
+    (r"^[a-fA-F0-9]{8}$",
+        [("CRC-32", None, None), ("CRC-32B", None, None), ("Adler-32", None, None),
+         ("FCS-32", None, None), ("XOR-32", None, None)]),
+    (r"^[a-fA-F0-9]{16}$",
+        [("MySQL323 (pre-4.1)", 200, "mysql"), ("DES (Unix/Oracle)", None, None),
+         ("Half MD5", 5100, None), ("CRC-64", None, None)]),
+    (r"^[a-fA-F0-9]{32}$",
+        [("MD5", 0, "raw-md5"), ("NTLM", 1000, "nt"), ("LM", 3000, "lm"),
+         ("MD4", 900, "raw-md4"), ("double MD5 / md5(md5)", 2600, None),
+         ("RIPEMD-128", None, "ripemd-128"), ("MD2", None, None),
+         ("Tiger-128", None, None), ("HAVAL-128", None, None), ("Snefru-128", None, None)]),
+    (r"^[a-fA-F0-9]{40}$",
+        [("SHA-1", 100, "raw-sha1"), ("RIPEMD-160", 6000, "ripemd-160"),
+         ("double SHA-1", 4500, None), ("Tiger-160", None, None),
+         ("HAVAL-160", None, None), ("SHA-1(HMAC)", None, None)]),
+    (r"^[a-fA-F0-9]{48}$",
+        [("Tiger-192", None, "tiger"), ("HAVAL-192", None, None),
+         ("SHA-1 (Oracle 11g)", 112, None)]),
+    (r"^[a-fA-F0-9]{56}$",
+        [("SHA-224", 1300, "raw-sha224"), ("SHA3-224", 17300, None),
+         ("Keccak-224", 17700, None), ("HAVAL-224", None, None)]),
+    (r"^[a-fA-F0-9]{64}$",
+        [("SHA-256", 1400, "raw-sha256"), ("SHA3-256", 17400, None),
+         ("Keccak-256", 17800, None), ("RIPEMD-256", None, None),
+         ("BLAKE2s-256", None, None), ("GOST R 34.11-94", 6900, "gost"),
+         ("Streebog-256", 11700, None), ("HAVAL-256", None, None), ("Snefru-256", None, None)]),
+    (r"^[a-fA-F0-9]{80}$",
+        [("RIPEMD-320", None, None)]),
+    (r"^[a-fA-F0-9]{96}$",
+        [("SHA-384", 10800, "raw-sha384"), ("SHA3-384", 17500, None),
+         ("Keccak-384", 17900, None)]),
+    (r"^[a-fA-F0-9]{128}$",
+        [("SHA-512", 1700, "raw-sha512"), ("SHA3-512", 17600, None),
+         ("Keccak-512", 18000, None), ("Whirlpool", 6100, "whirlpool"),
+         ("BLAKE2b-512", 600, "raw-blake2"), ("Streebog-512", 11800, None),
+         ("GOST R 34.11-2012 (512)", None, None)]),
+
+    # --- short / base64 (ambiguous, listed last) ---
+    (r"^[A-Za-z0-9./]{16}$",
+        [("Cisco-PIX MD5", 2400, "pix-md5"), ("Cisco-ASA MD5", 2410, "asa-md5")]),
+    (r"^[A-Za-z0-9+/]{22}==$",
+        [("MD5 (base64)", None, None)]),
+    (r"^[A-Za-z0-9+/]{27}=$",
+        [("SHA-1 (base64)", None, "raw-sha1")]),
+    (r"^[A-Za-z0-9+/]{43}=$",
+        [("SHA-256 (base64)", None, None)]),
+]
+
+_HASH_DB = [(re.compile(p), cands) for p, cands in _HASH_DB_RAW]
+
+
+def identify_hash(h: str):
+    """return de-duplicated (name, hashcat_mode, john_format) candidates."""
+    results = []
+    seen = set()
+    for rx, cands in _HASH_DB:
+        if rx.match(h):
+            for name, mode, john in cands:
+                if name not in seen:
+                    seen.add(name)
+                    results.append((name, mode, john))
+    return results
+
+
+def _identify_one(h: str, multi: bool):
+    if multi or not QUIET:
+        shown = h if len(h) <= 54 else h[:54] + "..."
+        # case preserved: a hash must not be lower-cased like other ui text.
+        eprint(f"\n{DIM}--- hashid ---{RST} {shown}")
+    matches = identify_hash(h)
+    if not matches:
+        warn("no match / unknown format.")
+        return
+    if not QUIET:
+        eprint(f"{W}{'type':<34}{'hashcat':<11}john{RST}")
+    for name, mode, john in matches:
+        hc = f"-m {mode}" if mode is not None else "-"
+        jf = john or "-"
+        if QUIET:
+            print(f"{name}\t{mode if mode is not None else ''}\t{jf}")
+        else:
+            print(f"{G}{name:<34}{RST}{C}{hc:<11}{RST}{DIM}{jf}{RST}")
+
+
+def hashid_command(args: list):
+    """identify the type(s) of one or more hashes (args or stdin, one per line)."""
+    if args:
+        hashes = args
+    else:
+        hashes = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip()]
+    if not hashes:
+        err("usage: ignorante hashid <hash> [hash...]   (or pipe hashes on stdin)")
+        sys.exit(1)
+    multi = len(hashes) > 1
+    for h in hashes:
+        _identify_one(h, multi)
+
+
+# ─────────────────────────────────────────────
 #  cli entry point
 # ─────────────────────────────────────────────
 
@@ -909,6 +1117,7 @@ def usage():
   ignorante scan <host> [-p spec]     fast tcp connect scan + service detection
   ignorante enc <scheme> [data]       encode (schemes below; reads stdin if no data)
   ignorante dec <scheme|auto> [data]  decode ('auto' tries every scheme)
+  ignorante hashid <hash> [hash...]   identify hash type(s) + hashcat/john mode
 
 {Y}gen types:{RST}
   {DIM}{', '.join(PAYLOADS)}{RST}
@@ -979,6 +1188,9 @@ def main():
 
     elif cmd == "dec":
         dec_command(rest)
+
+    elif cmd == "hashid":
+        hashid_command(rest)
 
     else:
         err(f"unknown command: '{cmd}'")

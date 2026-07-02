@@ -23,6 +23,8 @@ stdlib only, lowercase aesthetic.
 
 [>] `enc` / `dec` — encoding toolbox (base64/32, hex, url, rot13, ascii85, auto)
 
+[>] `hashid` — identify hash type(s) with hashcat `-m` mode + john format
+
 ### about
 
 this is a utility tool for ctf, mostly used on htb. i update it as i find things
@@ -52,6 +54,10 @@ python3 ignorante.py scan target.htb -p- -t 0.5 -w 800
 python3 ignorante.py enc b64 "secret"
 python3 ignorante.py dec auto "ZmxhZ3tleWV9"
 echo -n data | python3 ignorante.py enc hex -q
+
+# identify hash type(s) — one arg, many args, or piped (one per line)
+python3 ignorante.py hashid '$2y$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy'
+cat hashes.txt | python3 ignorante.py hashid
 ```
 
 ### flags
@@ -77,9 +83,12 @@ echo -n data | python3 ignorante.py enc hex -q
   not a full nmap replacement — no root syn scan, os detection or nse.
 - **enc / dec:** base64, base32, hex, url, rot13, ascii85. `dec auto` byte-scores
   every distinctive-alphabet decoder and shows the ones that yield readable text.
+- **hashid:** regex table of structured formats (bcrypt, the `$N$` crypt family,
+  ldap, kerberos, netntlm, jwt, app formats) plus raw-hex classification by
+  length. reports every candidate most-likely-first with its hashcat `-m` mode
+  and john format. accepts one hash, many hashes, or a list piped on stdin.
 
 ### roadmap
 
-candidate modules: `cheat` (offline gtfobins-style lookup), `hashid` (hash type
-id).
+candidate modules: `cheat` (offline gtfobins-style lookup).
 ```
