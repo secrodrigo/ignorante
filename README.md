@@ -87,8 +87,3 @@ cat hashes.txt | python3 ignorante.py hashid
   ldap, kerberos, netntlm, jwt, app formats) plus raw-hex classification by
   length. reports every candidate most-likely-first with its hashcat `-m` mode
   and john format. accepts one hash, many hashes, or a list piped on stdin.
-
-### roadmap
-
-candidate modules: `cheat` (offline gtfobins-style lookup).
-```
